@@ -22,42 +22,56 @@ intents = discord.Intents.default()
 intents.guilds = True
 intents.voice_states = True
 
-client = discord.Client(intents=intents)
+class VoiceBot(discord.Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.is_connecting = False
 
-is_connecting = False
+    async def setup_hook(self):
+        # สร้าง Loop เช็กความเรียบร้อยเมื่อบอทเริ่มทำงาน
+        self.loop.create_task(self.background_check())
 
-async def connect_voice_channel():
-    global is_connecting
-    if is_connecting:
-        return
-    
-    is_connecting = True
-    try:
-        channel = client.get_channel(VOICE_CHANNEL_ID)
-        if channel is None:
-            try:
-                channel = await client.fetch_channel(VOICE_CHANNEL_ID)
-            except Exception:
-                pass
+    async def connect_voice_channel(self):
+        if self.is_connecting:
+            return
+        
+        self.is_connecting = True
+        try:
+            channel = self.get_channel(VOICE_CHANNEL_ID)
+            if channel is None:
+                try:
+                    channel = await self.fetch_channel(VOICE_CHANNEL_ID)
+                except Exception:
+                    pass
 
-        if channel:
-            # เช็กว่าถ้าอยู่ในห้องเสียงเดิมอยู่แล้ว และเชื่อมต่อสมบูรณ์ ไม่ต้องทำอะไร
-            if client.voice_clients:
-                vc = client.voice_clients[0]
-                if vc.channel.id == VOICE_CHANNEL_ID and vc.is_connected():
-                    is_connecting = False
-                    return
-                else:
-                    await vc.disconnect(force=True)
-                    await asyncio.sleep(1)
+            if channel:
+                # ถ้าอยู่ในห้องเสียงเดิมและเชื่อมต่อสมบูรณ์แล้ว ไม่ต้องทำอะไร
+                if self.voice_clients:
+                    vc = self.voice_clients[0]
+                    if vc.channel.id == VOICE_CHANNEL_ID and vc.is_connected():
+                        self.is_connecting = False
+                        return
+                    else:
+                        await vc.disconnect(force=True)
+                        await asyncio.sleep(1)
 
-            print(f'[VOICE] กำลังเข้าห้องเสียง: {channel.name}...', flush=True)
-            await channel.connect(reconnect=True, self_deaf=True, timeout=15.0)
-            print(f'[SUCCESS] เชื่อมต่อและสิงห้องเรียบร้อย!', flush=True)
-    except Exception as e:
-        print(f'[ERROR] เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}', flush=True)
-    finally:
-        is_connecting = False
+                print(f'[VOICE] กำลังเข้าห้องเสียง: {channel.name}...', flush=True)
+                await channel.connect(reconnect=True, self_deaf=True, timeout=15.0)
+                print(f'[SUCCESS] เชื่อมต่อและสิงห้องเรียบร้อย!', flush=True)
+        except Exception as e:
+            print(f'[ERROR] เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}', flush=True)
+        finally:
+            self.is_connecting = False
+
+    async def background_check(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            # เช็กความเสถียรทุก 30 วินาที ไม่ถี่เกินไปจนตัดสายเอง
+            if not self.voice_clients or not self.voice_clients[0].is_connected():
+                await self.connect_voice_channel()
+            await asyncio.sleep(30)
+
+client = VoiceBot(intents=intents)
 
 @client.event
 async def on_ready():
@@ -67,24 +81,15 @@ async def on_ready():
     except Exception:
         pass
     
-    # พยายามเข้าห้องเสียงเมื่อออนไลน์
-    await connect_voice_channel()
+    await client.connect_voice_channel()
 
 @client.event
 async def on_voice_state_update(member, before, after):
-    # ถ้าตัวบอทเองโดนเตะหลุด หรือถูกย้ายห้อง ให้พยายามกลับเข้าห้องเดิม
+    # ถ้าบอทโดนเตะหรือสายหลุด ให้สั่งเชื่อมต่อใหม่
     if member.id == client.user.id:
         if after.channel is None or after.channel.id != VOICE_CHANNEL_ID:
             await asyncio.sleep(3)
-            await connect_voice_channel()
-
-async def background_check():
-    await client.wait_until_ready()
-    while not client.is_closed():
-        # เช็กความถูกต้องทุกๆ 30 วินาทีพอ ไม่ต้องเช็กถี่เพื่อป้องกันลูปตีกัน
-        if not client.voice_clients or not client.voice_clients[0].is_connected():
-            await connect_voice_channel()
-        await asyncio.sleep(30)
+            await client.connect_voice_channel()
 
 if __name__ == '__main__':
     server_thread = threading.Thread(target=run_flask, daemon=True)
@@ -92,8 +97,6 @@ if __name__ == '__main__':
 
     TOKEN = os.environ.get('DISCORD_TOKEN')
     if TOKEN:
-        # เริ่มต้น Background Task เช็กความเสถียร
-        client.loop.create_task(background_check())
         client.run(TOKEN)
     else:
         print('[ERROR] ไม่พบ DISCORD_TOKEN!', flush=True)
