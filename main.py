@@ -7,7 +7,7 @@ intents = discord.Intents.all()
 client = discord.Client(intents=intents)
 
 # ใส่ ID ห้องเสียงของคุณ
-VOICE_CHANNEL_ID = 1512748513492902132
+VOICE_CHANNEL_ID = 1512748513492992132
 
 @client.event
 async def on_ready():
