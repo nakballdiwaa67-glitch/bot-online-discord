@@ -18,63 +18,73 @@ def run_flask():
 # --- 2. ตั้งค่า Discord Bot ---
 VOICE_CHANNEL_ID = 1512748513492992132
 
-class AdminVoiceBot(discord.Client):
-    async def setup_hook(self):
-        # สร้าง Background Task แยกเด็ดขาดตั้งแต่นาทีแรกที่เริ่มรัน
-        self.loop.create_task(self.keep_voice_alive())
-
-    async def keep_voice_alive(self):
-        await self.wait_until_ready()
-        print(f'[ONLINE] บอท {self.user} ล็อกอินสำเร็จแล้ว!', flush=True)
-        
-        try:
-            await self.change_presence(activity=discord.Game(name="สิงห้องแอดมิน 24 ชม. 🟢"))
-        except Exception:
-            pass
-
-        while not self.is_closed():
-            try:
-                # ถ้าเข้าห้องเสียงอยู่แล้ว และสถานะปกติ ให้ข้ามไปรอนิ่งๆ 20 วินาที
-                if self.voice_clients and self.voice_clients[0].is_connected():
-                    await asyncio.sleep(20)
-                    continue
-
-                channel = self.get_channel(VOICE_CHANNEL_ID)
-                if channel is None:
-                    try:
-                        channel = await self.fetch_channel(VOICE_CHANNEL_ID)
-                    except Exception as e:
-                        print(f'[ERROR] หาห้องไม่เจอ: {e}', flush=True)
-
-                if channel:
-                    print(f'[VOICE] กำลังเข้าห้อง: {channel.name}...', flush=True)
-                    
-                    # ล้างสายเก่าทิ้ง
-                    if self.voice_clients:
-                        try:
-                            await self.voice_clients[0].disconnect(force=True)
-                        except Exception:
-                            pass
-                        await asyncio.sleep(2)
-
-                    # เชื่อมต่อแบบปิด reconnect อัตโนมัติ (เพื่อป้องกันการวนลูปเตะตัวเองออก)
-                    await channel.connect(reconnect=False, self_deaf=True, timeout=20.0)
-                    print(f'[SUCCESS] เข้าห้องสำเร็จ นิ่งยาวๆ แล้วครับ!', flush=True)
-                    await asyncio.sleep(15)
-                else:
-                    print(f'[ERROR] ไม่พบ ID ห้องเสียงในระบบ', flush=True)
-
-            except Exception as e:
-                print(f'[VOICE-RETRY] รอการเชื่อมต่อใหม่รอบถัดไป... (Error: {e})', flush=True)
-            
-            # เว้นระยะห่างในการพยายามเชื่อมต่อใหม่ทุก 10 วินาที
-            await asyncio.sleep(10)
-
 intents = discord.Intents.default()
 intents.guilds = True
 intents.voice_states = True
 
-client = AdminVoiceBot(intents=intents)
+client = discord.Client(intents=intents)
+
+is_connecting = False
+
+async def connect_voice_channel():
+    global is_connecting
+    if is_connecting:
+        return
+    
+    is_connecting = True
+    try:
+        channel = client.get_channel(VOICE_CHANNEL_ID)
+        if channel is None:
+            try:
+                channel = await client.fetch_channel(VOICE_CHANNEL_ID)
+            except Exception:
+                pass
+
+        if channel:
+            # เช็กว่าถ้าอยู่ในห้องเสียงเดิมอยู่แล้ว และเชื่อมต่อสมบูรณ์ ไม่ต้องทำอะไร
+            if client.voice_clients:
+                vc = client.voice_clients[0]
+                if vc.channel.id == VOICE_CHANNEL_ID and vc.is_connected():
+                    is_connecting = False
+                    return
+                else:
+                    await vc.disconnect(force=True)
+                    await asyncio.sleep(1)
+
+            print(f'[VOICE] กำลังเข้าห้องเสียง: {channel.name}...', flush=True)
+            await channel.connect(reconnect=True, self_deaf=True, timeout=15.0)
+            print(f'[SUCCESS] เชื่อมต่อและสิงห้องเรียบร้อย!', flush=True)
+    except Exception as e:
+        print(f'[ERROR] เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}', flush=True)
+    finally:
+        is_connecting = False
+
+@client.event
+async def on_ready():
+    print(f'[ONLINE] บอท {client.user} ออนไลน์แล้ว!', flush=True)
+    try:
+        await client.change_presence(activity=discord.Game(name="สิงห้องแอดมิน 24 ชม. 🟢"))
+    except Exception:
+        pass
+    
+    # พยายามเข้าห้องเสียงเมื่อออนไลน์
+    await connect_voice_channel()
+
+@client.event
+async def on_voice_state_update(member, before, after):
+    # ถ้าตัวบอทเองโดนเตะหลุด หรือถูกย้ายห้อง ให้พยายามกลับเข้าห้องเดิม
+    if member.id == client.user.id:
+        if after.channel is None or after.channel.id != VOICE_CHANNEL_ID:
+            await asyncio.sleep(3)
+            await connect_voice_channel()
+
+async def background_check():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        # เช็กความถูกต้องทุกๆ 30 วินาทีพอ ไม่ต้องเช็กถี่เพื่อป้องกันลูปตีกัน
+        if not client.voice_clients or not client.voice_clients[0].is_connected():
+            await connect_voice_channel()
+        await asyncio.sleep(30)
 
 if __name__ == '__main__':
     server_thread = threading.Thread(target=run_flask, daemon=True)
@@ -82,6 +92,8 @@ if __name__ == '__main__':
 
     TOKEN = os.environ.get('DISCORD_TOKEN')
     if TOKEN:
+        # เริ่มต้น Background Task เช็กความเสถียร
+        client.loop.create_task(background_check())
         client.run(TOKEN)
     else:
-        print('[ERROR] ไม่พบ DISCORD_TOKEN ใน Environment Variables!', flush=True)
+        print('[ERROR] ไม่พบ DISCORD_TOKEN!', flush=True)
