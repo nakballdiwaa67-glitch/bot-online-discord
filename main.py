@@ -18,7 +18,7 @@ def run_flask():
 
 # --- 2. ตั้งค่า Discord Bot ---
 # 📌 ID ห้อง "พูดคุยรุ่นใหญ่"
-VOICE_CHANNEL_ID = 1512748513492902132
+VOICE_CHANNEL_ID = 1512748513492992132
 
 intents = discord.Intents.default()
 intents.guilds = True
