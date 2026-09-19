@@ -4,54 +4,60 @@ import threading
 from flask import Flask
 import discord
 
-# --- Web Server หลอก Render ไม่ให้สั่งดับ ---
+# --- 1. Web Server หลอก Render ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is alive 24/7!"
+    return "Bot is active 24/7!"
 
 def run_flask():
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- Discord Bot ---
-intents = discord.Intents.all()
+# --- 2. Discord Bot ---
+intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-# 📌 เอา ID ของห้อง "พูดคุยรุ่นใหญ่" มาใส่ตรงนี้ครับ (วางแทนตัวเลขเดิมได้เลย)
+# 📌 ระบุ ID ของห้อง "ทำงานแอดมิน" (ตรวจเช็กตัวเลขให้ถูกต้อง)
 VOICE_CHANNEL_ID = 1512748513492902132
-
-@client.event
-async def on_ready():
-    print(f'[ONLINE] บอท {client.user} ออนไลน์เรียบร้อยแล้ว!')
-    await client.change_presence(activity=discord.Game(name="ชิว 24 ชม. 🟢"))
-    client.loop.create_task(keep_voice_alive())
 
 async def keep_voice_alive():
     await client.wait_until_ready()
+    print(f'[ONLINE] บอท {client.user} ออนไลน์แล้ว! กำลังเริ่มทำงานระบบห้องเสียง...')
+    await client.change_presence(activity=discord.Game(name="สิงห้องแอดมิน 24 ชม. 🟢"))
+    
     while not client.is_closed():
         try:
             channel = client.get_channel(VOICE_CHANNEL_ID)
             if channel:
-                # ถ้าหลุด หรือยังไม่ได้เข้าห้อง ให้กดเข้าห้องทันที
+                # เช็กว่าบอทเชื่อมต่ออยู่หรือไม่ ถ้ายังไม่เข้าหรือสายหลุด ให้สั่งเชื่อมต่อ
                 if not client.voice_clients or not client.voice_clients[0].is_connected():
-                    print(f'[VOICE] กำลังเชื่อมต่อเข้าห้อง: {channel.name}')
-                    # self_deaf=True เพื่อให้ปิดหูและปิดไมค์อัตโนมัติแบบในรูป
+                    print(f'[VOICE] กำลังดึงบอทเข้าห้อง: {channel.name}')
                     await channel.connect(reconnect=True, self_deaf=True)
-                    print(f'[VOICE] เชื่อมต่อสำเร็จ!')
+                    print(f'[VOICE] ดึงบอทเข้าห้องสำเร็จ!')
             else:
-                print(f'[ERROR] หาห้อง ID: {VOICE_CHANNEL_ID} ไม่เจอ')
+                print(f'[ERROR] หาห้อง ID: {VOICE_CHANNEL_ID} ไม่เจอ ตรวจสอบ ID หรือสิทธิ์บอทอีกครั้ง')
         except Exception as e:
-            print(f'[ERROR] Voice error: {e}')
+            print(f'[ERROR] เกิดข้อผิดพลาดในห้องเสียง: {e}')
         
-        # เช็กความเคลื่อนไหวทุกๆ 5 วินาที
+        # วนลูปตรวจเช็กทุกๆ 5 วินาที
         await asyncio.sleep(5)
 
+@client.event
+async def on_ready():
+    # เรียกทำงานTask ห้องเสียงเมื่อพร้อม
+    client.loop.create_task(keep_voice_alive())
+
 if __name__ == '__main__':
+    # รัน Web Server แยกใน Background Thread
     server_thread = threading.Thread(target=run_flask)
     server_thread.daemon = True
     server_thread.start()
 
+    # รัน Discord Bot
     TOKEN = os.environ.get('DISCORD_TOKEN')
-    client.run(TOKEN)
+    if TOKEN:
+        client.run(TOKEN)
+    else:
+        print('[ERROR] ไม่พบ DISCORD_TOKEN ใน Environment Variables!')
