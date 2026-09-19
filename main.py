@@ -31,18 +31,16 @@ async def keep_voice_alive():
     
     try:
         await client.change_presence(activity=discord.Game(name="สิงห้องแอดมิน 24 ชม. 🟢"))
-    except Exception as e:
+    except Exception:
         pass
 
     while not client.is_closed():
         try:
-            # 1. เช็กว่าบอทเชื่อมต่อห้องเสียงอยู่นิ่งๆ แล้วหรือยัง
+            # เช็กว่าเชื่อมต่ออยู่นิ่งๆ แล้วหรือยัง
             if client.voice_clients and client.voice_clients[0].is_connected():
-                # ถ้าอยู่ในห้องเสียงดีอยู่แล้ว ให้หน่วงเวลา 15 วินาที แล้ววนลูปเช็กใหม่ (ไม่สั่ง connect ซ้ำ)
                 await asyncio.sleep(15)
                 continue
 
-            # 2. ถ้ายังไม่ได้เข้า หรือสายหลุดจริงๆ ให้ดึงห้องเสียง
             channel = client.get_channel(VOICE_CHANNEL_ID)
             if channel is None:
                 try:
@@ -53,22 +51,23 @@ async def keep_voice_alive():
             if channel:
                 print(f'[VOICE] กำลังเชื่อมต่อเข้าห้อง: {channel.name}...', flush=True)
                 
-                # ตัดสายค้างเก่าออกก่อนเพื่อความสะอาด
+                # ล้างการเชื่อมต่อเก่าที่ค้างอยู่
                 if client.voice_clients:
-                    await client.voice_clients[0].disconnect(force=True)
+                    try:
+                        await client.voice_clients[0].disconnect(force=True)
+                    except Exception:
+                        pass
                     await asyncio.sleep(2)
 
-                # สั่งเชื่อมต่อเข้าห้องเสียง
-                await channel.connect(reconnect=True, self_deaf=True)
-                print(f'[SUCCESS] เข้าห้องเสียงและล็อกสถานะเรียบร้อย!', flush=True)
-                
-                # รอให้ระบบเชื่อมต่อ Voice Gateway เสถียรก่อน 10 วินาที
+                # เชื่อมต่อเข้าห้องเสียงพร้อมกำหนด timeout ป้องกันการค้าง
+                await channel.connect(reconnect=True, self_deaf=True, timeout=30.0)
+                print(f'[SUCCESS] เข้าห้องเสียงเรียบร้อย นั่งยาวๆ ได้เลย!', flush=True)
                 await asyncio.sleep(10)
             else:
                 print(f'[ERROR] หาห้องเสียงไม่พบ', flush=True)
 
         except Exception as e:
-            print(f'[ERROR] เกิดข้อผิดพลาดในห้องเสียง: {e}', flush=True)
+            print(f'[ERROR] เกิดข้อผิดพลาดระหว่างต่อสาย: {e}', flush=True)
         
         await asyncio.sleep(5)
 
